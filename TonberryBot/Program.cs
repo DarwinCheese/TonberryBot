@@ -20,7 +20,8 @@ namespace TonberryBot
 
             //  You can assign your bot token to a string, and pass that in to connect.
             //  This is, however, insecure, particularly if you plan to have your code hosted in a public repository.
-            var token = "OTE3NDgxNTE3MDY2OTA3NjYx.Ya5VPw.EgOoP4g1rMx4ptoowbqYEYU9gvU";
+            var token = System.Environment
+                .GetEnvironmentVariable("Tonberry_Bot_Token", EnvironmentVariableTarget.Machine); ;
 
             // Some alternative options would be to keep your token in an Environment Variable or a standalone file.
             // var token = Environment.GetEnvironmentVariable("NameOfYourEnvironmentVariable");
