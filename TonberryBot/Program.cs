@@ -1,44 +1,68 @@
-﻿using Discord;
-using Discord.WebSocket;
-using System;
+﻿using System;
+using System.IO;
 using System.Threading.Tasks;
+using Discord;
+using Discord.Addons.Hosting;
+using Discord.Commands;
+using Discord.WebSocket;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Http;
+using TonberryBot.Services;
 
 namespace TonberryBot
 {
     internal class Program
     {
-        public static void Main(string[] args)
-            => new Program().MainAsync().GetAwaiter().GetResult();
-
-        private DiscordSocketClient _client;
-
-        public async Task MainAsync()
+        private static async Task Main()
         {
-            _client = new DiscordSocketClient();
+            var builder = new HostBuilder()
+            .ConfigureAppConfiguration(x =>
+            {
+                var configuration = new ConfigurationBuilder()
+                .SetBasePath(Directory.GetCurrentDirectory())
+                .AddJsonFile("appsettings.json", false, true)
+                .Build();
 
-            _client.Log += Log;
+                x.AddConfiguration(configuration);
+            })
+            .ConfigureLogging(x =>
+            {
+                x.AddConsole();
+                x.SetMinimumLevel(LogLevel.Debug);
+            })
+            .ConfigureDiscordHost((context, config) =>
+            {
+                config.SocketConfig = new DiscordSocketConfig
+                {
+                    LogLevel = LogSeverity.Debug,
+                    AlwaysDownloadUsers = false,
+                    MessageCacheSize = 200
+                };
 
-            //  You can assign your bot token to a string, and pass that in to connect.
-            //  This is, however, insecure, particularly if you plan to have your code hosted in a public repository.
-            var token = System.Environment
-                .GetEnvironmentVariable("Tonberry_Bot_Token", EnvironmentVariableTarget.Machine); ;
+                config.Token = context.Configuration["Token"];
+            })
+            .UseCommandService((context, config) =>
+            {
+                config.CaseSensitiveCommands = false;
+                config.LogLevel = LogSeverity.Debug;
+                config.DefaultRunMode = RunMode.Sync;
+            })
+            .ConfigureServices((context, services) =>
+            {
+                services
+                    .AddHostedService<CommandHandler>()
+                    .AddHostedService<BotStatusService>();
+            })
+            .UseConsoleLifetime();
 
-            // Some alternative options would be to keep your token in an Environment Variable or a standalone file.
-            // var token = Environment.GetEnvironmentVariable("NameOfYourEnvironmentVariable");
-            // var token = File.ReadAllText("token.txt");
-            // var token = JsonConvert.DeserializeObject<AConfigurationClass>(File.ReadAllText("config.json")).Token;
-
-            await _client.LoginAsync(TokenType.Bot, token);
-            await _client.StartAsync();
-
-            // Block this task until the program is closed.
-            await Task.Delay(-1);
-        }
-
-        private Task Log(LogMessage msg)
-        {
-            Console.WriteLine(msg.ToString());
-            return Task.CompletedTask;
+            var host = builder.Build();
+            using (host)
+            {
+                await host.RunAsync();
+            }
         }
     }
 }

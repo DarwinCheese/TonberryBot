@@ -1,67 +1,74 @@
-﻿using Discord.Commands;
+﻿using Discord;
+using Discord.Commands;
 using Discord.WebSocket;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
+using TonberryBot.services;
 
 namespace TonberryBot
 {
-    public class CommandHandler
+    public class CommandHandler : TonberryBaseService
     {
+        private readonly IServiceProvider _provider;
         private readonly DiscordSocketClient _client;
-        private readonly CommandService _commands;
-
-        // Retrieve client and CommandService instance via ctor
-        public CommandHandler(DiscordSocketClient client, CommandService commands)
+        private readonly CommandService _service;
+        private readonly IConfiguration _configuration;
+        
+        public CommandHandler(IServiceProvider provider, DiscordSocketClient client, CommandService service, IConfiguration configuration, ILogger<CommandHandler> logger)
+            :base(client, logger, configuration)
         {
-            _commands = commands;
+            _provider = provider;
             _client = client;
+            _service = service;
+            _configuration = configuration;
         }
 
-        public async Task InstallCommandsAsync()
+        protected override async Task ExecuteAsync(CancellationToken cancellationToken)
         {
-            // Hook the MessageReceived event into our command handler
-            _client.MessageReceived += HandleCommandAsync;
-
-            // Here we discover all of the command modules in the entry 
-            // assembly and load them. Starting from Discord.NET 2.0, a
-            // service provider is required to be passed into the
-            // module registration method to inject the 
-            // required dependencies.
-            //
-            // If you do not use Dependency Injection, pass null.
-            // See Dependency Injection guide for more information.
-            await _commands.AddModulesAsync(assembly: Assembly.GetEntryAssembly(),
-                                            services: null);
+            _client.MessageReceived += OnMessageReceived;
+            _service.CommandExecuted += OnCommandExecuted;
+            await _service.AddModulesAsync(Assembly.GetEntryAssembly(), _provider);
         }
 
-        private async Task HandleCommandAsync(SocketMessage messageParam)
+        private async Task OnCommandExecuted(Optional<CommandInfo> commandInfo, ICommandContext commandContext, IResult result)
         {
-            // Don't process the command if it was a system message
-            var message = messageParam as SocketUserMessage;
-            if (message == null) return;
-
-            // Create a number to track where the prefix ends and the command begins
-            int argPos = 0;
-
-            // Determine if the message is a command based on the prefix and make sure no bots trigger commands
-            if (!(message.HasCharPrefix('!', ref argPos) ||
-                message.HasMentionPrefix(_client.CurrentUser, ref argPos)) ||
-                message.Author.IsBot)
+            if (result.IsSuccess)
+            {
                 return;
+            }
 
-            // Create a WebSocket-based command context based on the message
+            await commandContext.Channel.SendMessageAsync(result.ErrorReason);
+        }
+
+        private async Task OnMessageReceived(SocketMessage socketMessage)
+        {
+            if (!(socketMessage is SocketUserMessage message))
+            {
+                return;
+            }
+
+            if (message.Source != MessageSource.User)
+            {
+                return;
+            }
+
+            var argPos = 0;
+            var user = message.Author as SocketGuildUser;
+            var prefix = "";
+            if (!message.HasStringPrefix(prefix, ref argPos) && !message.HasMentionPrefix(_client.CurrentUser, ref argPos))
+            {
+                return;
+            }
+
             var context = new SocketCommandContext(_client, message);
-
-            // Execute the command with the command context we just
-            // created, along with the service provider for precondition checks.
-            await _commands.ExecuteAsync(
-                context: context,
-                argPos: argPos,
-                services: null);
+            await _service.ExecuteAsync(context, argPos, _provider);
         }
     }
 }
